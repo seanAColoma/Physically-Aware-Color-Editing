@@ -53,34 +53,48 @@ def save_image(img, path):
     Image.fromarray(img).save(path)
 
 
-def editShadingRGB(input_img_np, colors_list, colors_edited_list):
+def solveShadingRGB(input_img_np, colors_list):
     """
     Args:
         input_img_np: numpy array (H, W, 3), uint8 or float in [0,255]
         colors_list: list of [R,G,B] values (0-255)
-        colors_edited_list: same shape as colors_list
 
     Returns:
-        edited_img_np: numpy array (H, W, 3), uint8 in [0,255]
+        T: linear combination tensor (Number of palette colors, H, W)
     """
 
     # convert input image to torch
     shading = torch.tensor(input_img_np / 255.0, dtype=torch.float32)
 
     # convert palettes
-    colors, colors_edited = colors_list, colors_edited_list
+    colors = colors_list
     if [255, 255, 255] not in colors_list:
         colors = colors_list + [[255, 255, 255]]
-    if [255, 255, 255] not in colors_edited_list:
-        colors_edited = colors_edited_list + [[255, 255, 255]]
     colors = torch.tensor(colors, dtype=torch.float32) / 255.0
+    
+    # solve decomposition
+    T = decompose_shading(shading, colors)
+    return T
+
+
+def editShadingRGB(T, colors_edited_list):
+    """
+    Args:
+        T: linear combination tensor (Number of palette colors, H, W)
+        colors_edited_list: same shape as colors_list
+
+    Returns:
+        edited_img_np: numpy array (H, W, 3), uint8 in [0,255]
+    """
+
+    # convert palettes
+    colors_edited = colors_edited_list
+    if T.shape[0] > len(colors_edited_list):
+        colors_edited = colors_edited_list + [[255, 255, 255]]
     colors_edited = torch.tensor(colors_edited, dtype=torch.float32) / 255.0
 
-    # solve decomposition
-    T_s = decompose_shading(shading, colors)
-
     # reconstruct edited image
-    shading_edited = reconstruct_shading(T_s, colors_edited)
+    shading_edited = reconstruct_shading(T, colors_edited)
 
     # convert back to numpy uint8
     edited_img_np = shading_edited.clamp(0, 1).numpy()
@@ -125,7 +139,8 @@ if __name__ == "__main__":
 
     print("Editing shading ...")
 
-    shading_edited = editShadingRGB(shading, colors, colors_edited)
+    T = solveShadingRGB(shading, colors)
+    shading_edited = editShadingRGB(T, colors_edited)
     Image.fromarray(shading_edited).save(save_dir+"rgb.png")
 
     print("Done")
