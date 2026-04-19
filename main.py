@@ -7,6 +7,8 @@ from tkinter import colorchooser
 import colorEditing 
 import utils
 from layer import Layer
+from editShadingRGB import editShadingRGB, solveShadingRGB, reconstruct_shading
+import torch
 
 
 '''
@@ -32,11 +34,11 @@ layerColorButtonFrame = tk.Frame()
 notebook = ttk.Notebook(window)
 notebook.pack(side="left",expand=True)
 
-
-alphaLayers = []
 albedoLayers = []
 layerColorButtons = []
 layerColorValues = []
+
+shadingDecomp = torch.zeros(3, 4) 
 
 # consider renaming these
 albedoNumpy = np.zeros((512, 512, 3), dtype=np.uint8)
@@ -89,7 +91,7 @@ def addAlbedoLayer():
     filePath = utils.selectImageFile()
     rgbFilePath = utils.selectTextFile()
     
-    selectedLayer = Image.open(filePath)
+    selectedLayer = Image.open(filePath).convert("RGBA")
     rgbValue = utils.readRGBFromText(rgbFilePath)
 
     numpyLayer = np.asarray(selectedLayer).copy()
@@ -108,20 +110,22 @@ def addAlbedoLayer():
 def addShading():
     global shadingNumpy
     filePath = utils.selectImageFile()
-    selectedImage = Image.open(filePath)
-    shadingNumpy = np.asarray(selectedImage)
+    selectedImage = Image.open(filePath).convert("RGBA")
+
+    shadingNumpy = np.asarray(selectedImage).copy()
+    print(shadingNumpy.shape)
 
     updateShading()
 
 def addResidual():
     global residualNumpy
     filePath = utils.selectImageFile()
-    selectedImage = Image.open(filePath)
+    selectedImage = Image.open(filePath).convert("RGBA")
     residualNumpy = np.asarray(selectedImage)
 
     updateResidual()
+
 def createNewLayerColorButton(color, layer):
-    global displayAlbedoImageLabel
     hexColor = utils.rgbToHex(color[0], color[1], color[2])
     newButton = tk.Button(
         background= hexColor,
@@ -148,7 +152,10 @@ def chooseColor(button, layer):
         layer.updateColor(np.asarray(color[0]).copy())
     
     updateAlbedo()
-    
+    applySolvedShading()
+    updateShading()
+
+# can probably be removed
 def updateCompositing(alphaLayers):
     return colorEditing.reconstructFromLayers(alphaLayers)
 
@@ -195,6 +202,34 @@ def resetLayerColorsCommand(layers):
     for layer in layers:
         layer.resetColor()
 
+def performShadingDecompositionCommand(albedoLayers, shadingNumpy):
+    global shadingDecomp
+    print("performing shading decomp")
+    colorList = []
+
+    for layer in albedoLayers:
+        colorList.append(layer.color.tolist())
+    
+    shadingNumpyRGB = shadingNumpy.copy()
+    if (shadingNumpyRGB.shape[2] == 4):
+        shadingNumpyRGB = shadingNumpyRGB[...,:3]
+    shadingDecomp = solveShadingRGB(shadingNumpyRGB, colorList)
+    print("end")
+
+def applySolvedShading():
+    # assumes shadingDecomp has been set properly
+    global shadingDecomp
+    global albedoLayers
+    colorList = []
+    for layer in albedoLayers:
+        colorList.append(layer.color.tolist())
+    newShadingRGB = editShadingRGB(shadingDecomp, colorList)
+
+    # change only the rgb channels
+    shadingNumpy[...,:3] = newShadingRGB
+
+
+
 addAlbedoLayerButton = tk.Button(
     text = "Add Albedo Color Layer",
     command=addAlbedoLayer,
@@ -219,6 +254,11 @@ addResidualButton = tk.Button(
 )
 addResidualButton.pack(side="bottom")
 
+performShadingDecompositionButton = tk.Button(
+    text = "Perform Shading Decomposition",
+    command=lambda: performShadingDecompositionCommand(albedoLayers, shadingNumpy),
+    master = resultFrame
+)
 saveAlbedoImageButton = tk.Button(
     text = "Save Albedo Image",
     command=lambda: saveImageCommand(albedoNumpy, "albedo.png"),
@@ -243,6 +283,7 @@ saveResultImageButton = tk.Button(
     master = resultFrame
 )
 
+performShadingDecompositionButton.pack(side="bottom")
 saveResultImageButton.pack(side="bottom")
 saveResidualImageButton.pack(side="bottom")
 saveShadingImageButton.pack(side="bottom")
