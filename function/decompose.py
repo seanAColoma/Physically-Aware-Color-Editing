@@ -14,7 +14,7 @@ def decompose(image_path):
     results = run_pipeline(models, image, device=device)
 
     img = results['image']
-    alb = view(results['hr_alb'])
+    alb = results['hr_alb']
     dif = results['dif_shd']   # raw linear shading, can be > 1
     res = results['residual']  # raw residual, can be negative
 

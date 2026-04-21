@@ -3,7 +3,7 @@ from PIL import Image
 from chrislib.general import match_scale
 from chrislib.data_util import load_image
 
-def perform_recolor(msk, alb, shd, res, shd_power=1.0, recolor=None):
+def perform_recolor(msk, alb, shd, res, shd_power=1.0, recolor=None, gamma = 2.2):
     # msk - numpy array (HxWx1) denoting the region to perform the edit
     # alb - linear albedo of the image
     # shd - linear shading of the image
@@ -20,13 +20,14 @@ def perform_recolor(msk, alb, shd, res, shd_power=1.0, recolor=None):
     masked_shd = msk * (shd ** shd_power)
     new_shd = ((1.0 - msk) * shd) + masked_shd
 
-    recolored = (our_new_alb * new_shd) ** (1/2.2)
+    # note: gamma changed to 2.0, reconstructions appeared too washed out with 2.2
+    recolored = (our_new_alb * new_shd) ** (1/gamma)
 
     # reconstruct: I = (Ad * Sd)^(1/2.2) + R
     return np.clip(recolored + res, 0, 1)
 
 if __name__ == '__main__':
-    alb = np.load('output/albedo.npy') ** 2.2   # undo view()'s gamma encoding
+    alb = np.load('output/albedo.npy')
     shd = np.load('output/diffuse_shading.npy')
     res = np.load('output/residual.npy')
 

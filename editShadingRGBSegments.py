@@ -159,6 +159,37 @@ def editShadingRGBSegments(T, colors_edited_list, segments_rgba_np):
 
     return edited_segments
 
+def editSingleShadingRGBSegment(T, colors_edited_list, segment_rgba_np):
+    """
+    Args:
+        T: (n, H, W)
+        colors_edited_list: list of [R,G,B]
+        segments_rgba_np: single rgb Segment (H, W, 4)
+
+    Returns:
+        edited_segments: list of numpy arrays (H, W, 4)
+    """
+
+    # convert palettes
+    if T.shape[0] > len(colors_edited_list):
+        colors_edited_list = colors_edited_list + [[255, 255, 255]]
+    colors_edited = torch.tensor(colors_edited_list, dtype=torch.float32) / 255.0
+
+    full_rgb = reconstruct_shading(T, colors_edited)
+
+    seg = torch.tensor(segment_rgba_np / 255.0, dtype=torch.float32)
+    seg_rgb = seg[..., :3]
+    seg_alpha = seg[..., 3:]
+
+    mask = seg_alpha > 1e-3
+    seg_rgb[mask.squeeze(-1)] = full_rgb[mask.squeeze(-1)]
+    seg_rgba = torch.cat([seg_rgb, seg_alpha], dim=-1)
+
+    seg_np_out = seg_rgba.clamp(0, 1).numpy()
+    seg_np_out = (seg_np_out * 255).astype(np.uint8)
+    
+    return seg_np_out
+
 def combineSegments(segs):
     """
     Args:
