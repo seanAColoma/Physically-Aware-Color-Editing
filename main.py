@@ -8,7 +8,7 @@ import colorEditing
 import utils
 from albedoLayer import Layer
 from selectableLayer import SelectableLayer
-from editShadingRGBSegments import solveShadingRGB, combineSegments, editSingleShadingRGBSegment
+from editShadingYUVSegments import solveShadingYUV, combineSegments, editSingleShadingYUVSegment
 import torch
 
 from function.reconstruct import perform_recolor
@@ -33,6 +33,9 @@ participatingLayers = []
 
 shadingDecomp = torch.zeros(3, 4) 
 residualDecomp = torch.zeros(3, 4)
+
+yResidualNumpy = np.zeros((512, 512), dtype=np.uint8)
+yShadingNumpy = np.zeros((512, 512), dtype=np.uint8)
 
 albedoNumpy = np.zeros((512, 512, 3), dtype=np.uint8)
 shadingNumpy = np.zeros((512, 512, 3), dtype=np.uint8)
@@ -464,15 +467,17 @@ def performShadingDecompositionCommand():
     print("performing shading decomposition")
     global shadingDecomp
     global shadingNumpy
+    global yShadingNumpy
 
-    shadingDecomp = performDecomposition(albedoLayers, shadingNumpy)
+    shadingDecomp, yShadingNumpy = performDecomposition(albedoLayers, shadingNumpy)
 
 def performResidualDecompositionCommand():
     print("performing residual decomposition")
     global residualDecomp
     global residualNumpy
+    global yResidualNumpy
 
-    residualDecomp = performDecomposition(albedoLayers, residualNumpy)
+    residualDecomp, yResidualNumpy = performDecomposition(albedoLayers, residualNumpy)
 
 def performBothDecompositionCommand():
     performResidualDecompositionCommand()
@@ -485,7 +490,7 @@ def performDecomposition(albedoLayers, shadingNumpy):
     participatingLayers = []
 
     for layer in albedoLayers:
-        if(utils.isColorful(layer.color)):
+        if(True):
             colorList.append(layer.color.tolist())
             participatingLayers.append(layer)
         else:
@@ -495,13 +500,13 @@ def performDecomposition(albedoLayers, shadingNumpy):
     if (shadingNumpyRGB.shape[2] == 4):
         shadingNumpyRGB = shadingNumpyRGB[...,:3]
     
-    decomp = solveShadingRGB(shadingNumpyRGB, colorList)
+    decomp, y = solveShadingYUV(shadingNumpyRGB, colorList)
 
     print("end")
-    return decomp
+    return decomp, y
 
 # update this to be on a segment by segment basis
-def applySolvedShading(decomposition, targetLayers):
+def applySolvedShading(decomposition, targetLayers, y):
     # assumes shadingDecomp has been set properly
     # assumes participating layers are already set
     # selected shading layers probably does not need to be a global
@@ -518,7 +523,7 @@ def applySolvedShading(decomposition, targetLayers):
     nonEditedSegments = []
     for layer in targetLayers:
         if(layer.selected.get()):
-            layer.image = editSingleShadingRGBSegment(decomposition, colorList, layer.image)
+            layer.image = editSingleShadingYUVSegment(decomposition, y, colorList, layer.image)
             editedSegments.append(layer.image)
             print("layer was selected")
         else:
@@ -534,8 +539,9 @@ def applySolvedShading(decomposition, targetLayers):
 def applyDecompositionToShading():
     global shadingNumpy
     global shadingLayers
+    global yShadingNumpy
 
-    newImage = applySolvedShading(shadingDecomp, shadingLayers)
+    newImage = applySolvedShading(shadingDecomp, shadingLayers, yShadingNumpy)
     shadingNumpy = newImage.copy()
 
     updateShading()
@@ -544,8 +550,9 @@ def applyDecompositionToShading():
 def applyDecompositionToResidual():
     global residualNumpy
     global residualLayers
+    global yResidualNumpy
 
-    newImage = applySolvedShading(residualDecomp, residualLayers)
+    newImage = applySolvedShading(residualDecomp, residualLayers, yResidualNumpy)
     residualNumpy = newImage.copy()
 
     updateResidual()
