@@ -8,14 +8,19 @@ import colorEditing
 import utils
 from albedoLayer import Layer
 from selectableLayer import SelectableLayer
-from editShadingRGBSegments import solveShadingRGB, editShadingRGBSegments, combineSegments, editSingleShadingRGBSegment
+from editShadingRGBSegments import solveShadingRGB, combineSegments, editSingleShadingRGBSegment
 import torch
-from function.reconstruct import perform_recolor
 
+from function.reconstruct import perform_recolor
+from function.decompose import decompose
 window = tk.Tk()
 layerColorButtonFrame = tk.Frame()
 notebook = ttk.Notebook(window)
 notebook.pack(side="left",expand=True)
+
+shadingAdded = False
+residualAdded = False
+albedoAdded = False
 
 albedoLayers = []
 shadingLayers = []
@@ -32,7 +37,6 @@ residualDecomp = torch.zeros(3, 4)
 albedoNumpy = np.zeros((512, 512, 3), dtype=np.uint8)
 shadingNumpy = np.zeros((512, 512, 3), dtype=np.uint8)
 selectedShadingNumpy = np.zeros((512, 512, 3), dtype=np.uint8)
-
 residualNumpy = np.zeros((512, 512, 3), dtype=np.uint8)
 selectedResidualNumpy = np.zeros((512, 512, 3), dtype=np.uint8)
 
@@ -72,7 +76,6 @@ displaySelectedShadingImageLabel = tk.Label(master=selectedShadingFrame, image =
 displaySelectedShadingImageLabel.image = displaySelectedShadingImage
 displaySelectedShadingImageLabel.pack()
 
-
 displayResidualImage = ImageTk.PhotoImage(Image.fromarray(residualNumpy))
 displayResidualImageLabel = tk.Label(master=residualFrame, image = displayResidualImage)
 displayResidualImageLabel.image = displayResidualImage
@@ -88,11 +91,30 @@ displayResultImageLabel = tk.Label(master=resultFrame, image = displayResultImag
 displayResultImageLabel.image = displayResultImage
 displayResultImageLabel.pack()
 
+def updateDecompositionButtonState():
+    global shadingAdded
+    global residualAdded
+    global albedoAdded
+    global performDecompositionButton
+    global resultNumpy
+    global layerColorButtons
+    if (shadingAdded and residualAdded and albedoAdded):
+        performDecompositionButton.config(state="active")
+        for button in layerColorButtons:
+            button.config(state="active")
+        resultNumpy = reconstructImage()
+        updateResult()
+    else:
+        for button in layerColorButtons:
+            button.config(state="disabled")
+        performDecompositionButton.config(state="disabled")
+
 def addAlbedoLayer():
     global albedoNumpy
     global displayAlbedoImage
     global albedoLayers
-
+    global albedoAdded
+    global performDecompositionButton
     filePath = utils.selectImageFile()
     rgbFilePath = utils.selectTextFile()
     
@@ -114,12 +136,16 @@ def addAlbedoLayer():
     for layer in albedoLayers:
         imageList.append(layer.image)
     albedoNumpy = updateCompositing(imageList)
+
+    albedoAdded = True
+    updateDecompositionButtonState()
     updateAlbedo()
 
 def addShadingLayer():
     global shadingNumpy
     global displayDiffuseShadingImage
     global shadingLayers
+    global shadingAdded
 
     filePath = utils.selectImageFile()
     selectedLayer = Image.open(filePath).convert("RGBA")
@@ -139,12 +165,17 @@ def addShadingLayer():
     shadingTickboxes.append(tickbox)
 
     shadingNumpy = updateCompositing(imageList)
+
+    shadingAdded = True
+
+    updateDecompositionButtonState()
     updateShading()
     updateTickboxes(shadingTickboxes)
 
 def addResidualLayer():
     global residualNumpy
     global residualLayers
+    global residualAdded
 
     filePath = utils.selectImageFile()
     selectedLayer = Image.open(filePath).convert("RGBA")
@@ -164,18 +195,24 @@ def addResidualLayer():
 
     residualNumpy = updateCompositing(imageList)
 
+    residualAdded = True
+
+    updateDecompositionButtonState()
     updateResidual()
     updateTickboxes(residualTickboxes)
 
 def createNewLayerColorButton(color, layer):
     hexColor = utils.rgbToHex(color[0], color[1], color[2])
+    
     newButton = tk.Button(
         background= hexColor,
         height=1,
         width=2,
         padx= 5,
-        pady= 5
+        pady= 5,
+        state="disabled"
     )
+    newButton.original_color = hexColor
 
     newButton.config(command=lambda b=newButton, l=layer: chooseColor(b, l))
 
@@ -197,6 +234,10 @@ def updateTickboxes(tickboxes, side = "right"):
 def updateButtons(buttons):
     for button in buttons:
         button.pack()
+    
+def resetButtonColors(buttons):
+    for button in buttons:
+        button.config(background=button.original_color)
 
 def chooseColor(button, layer):
     global resultNumpy
@@ -311,21 +352,131 @@ def saveImageCommand(image, name):
     pilResult = Image.fromarray(image)
     pilResult.save(name)
 
+# need to recalculate shading when this happens
 def resetLayerColorsCommand(layers):
+    global albedoNumpy
+    global resultNumpy
+    
     for layer in layers:
         layer.resetColor()
+    
+    imageList = []
+
+    for layer in layers:
+        imageList.append(layer.image)
+    
+    albedoNumpy = updateCompositing(imageList)
+    resetButtonColors(layerColorButtons)
+    updateAlbedo()
+    applyDecompositionToResidual()
+    applyDecompositionToShading()
+
+    resultNumpy = reconstructImage()
+    updateResult()
+    
+def resetButtons(buttons):
+    for button in buttons:
+        button.destroy()
+    
+def resetAlbedoCommand():
+    global albedoNumpy
+    global albedoLayers
+    global layerColorButtons
+    global participatingLayers
+    global albedoAdded
+
+    albedoLayers = []
+    participatingLayers = []
+    
+    albedoNumpy = np.zeros((512, 512), np.uint8)
+    resetButtons(layerColorButtons)
+    layerColorButtons = []
+    updateAlbedo()
+
+    albedoAdded = False
+    updateDecompositionButtonState()
+    resetResult()
+
+def resetShadingCommand():
+    global shadingNumpy
+    global shadingLayers
+    global shadingTickboxes
+    global selectedShadingNumpy
+    global shadingDecomp
+    global shadingAdded
+    shadingNumpy = np.zeros((512, 512), np.uint8)
+    shadingLayers = []
+    resetButtons(shadingTickboxes)
+
+    shadingTickboxes = []
+    selectedShadingNumpy = np.zeros((512, 512), np.uint8)
+    shadingDecomp = torch.zeros(3, 4)
+    updateShading()
+    updateSelectedShading(shadingLayers)
+    
+    shadingAdded = False
+
+    updateDecompositionButtonState()
+    
+    resetResult()
+
+def resetResidualCommand():
+    global residualNumpy
+    global residualLayers
+    global residualTickboxes
+    global selectedResidualNumpy
+    global residualDecomp
+    global residualAdded
+
+    residualNumpy = np.zeros((512, 512), np.uint8)
+    residualLayers = []
+    resetButtons(residualTickboxes)
+
+    residualTickboxes = []
+    selectedResidualNumpy = np.zeros((512, 512), np.uint8)
+
+    residualDecomp = torch.zeros(3, 4)
+    updateResidual()
+    updateSelectedResidual(residualLayers)
+
+    residualAdded = False
+
+    updateDecompositionButtonState()
+    resetResult()
+
+def resetResult():
+    global resultNumpy
+    resultNumpy = np.zeros((512, 512), np.uint8)
+    updateResult()
+
+def resetAllCommand():
+    resetAlbedoCommand()
+    resetShadingCommand()
+    resetResidualCommand()
+
+# need to finish this, ask duc about how to save the images that get outputted here
+def performIntrinsicDecompositionCommand():
+    filePath = utils.selectImageFile()
+    print("performing intrinsic decomposition")
+
 
 def performShadingDecompositionCommand():
     print("performing shading decomposition")
     global shadingDecomp
     global shadingNumpy
+
     shadingDecomp = performDecomposition(albedoLayers, shadingNumpy)
 
 def performResidualDecompositionCommand():
     print("performing residual decomposition")
     global residualDecomp
     global residualNumpy
+
     residualDecomp = performDecomposition(albedoLayers, residualNumpy)
+
+def performBothDecompositionCommand():
+    performResidualDecompositionCommand()
+    performShadingDecompositionCommand()
 
 def performDecomposition(albedoLayers, shadingNumpy):
     global participatingLayers
@@ -334,15 +485,18 @@ def performDecomposition(albedoLayers, shadingNumpy):
     participatingLayers = []
 
     for layer in albedoLayers:
-        color = layer.color.tolist()
-        if(utils.isColorful(color)):
+        if(utils.isColorful(layer.color)):
             colorList.append(layer.color.tolist())
             participatingLayers.append(layer)
+        else:
+            print("layer was rejected:" + str(layer.color))
 
     shadingNumpyRGB = shadingNumpy.copy()
     if (shadingNumpyRGB.shape[2] == 4):
         shadingNumpyRGB = shadingNumpyRGB[...,:3]
+    
     decomp = solveShadingRGB(shadingNumpyRGB, colorList)
+
     print("end")
     return decomp
 
@@ -417,7 +571,6 @@ def onGammaSliderMove(value):
     resultNumpy = reconstructImage()
     updateResult()
 
-
 gammaSlider = tk.Scale(
     master = resultFrame,
     from_=1, 
@@ -427,9 +580,36 @@ gammaSlider = tk.Scale(
     label="Set Gamma",
     command = onGammaSliderMove
 )
-
 gammaSlider.set(2.2)
 gammaSlider.pack()
+
+resetColorsButton = tk.Button(
+    master = rightFrame,
+    text="Reset Color Changes",
+    command = lambda: resetLayerColorsCommand(albedoLayers)
+)
+resetColorsButton.pack()
+
+resetAlbedoButton = tk.Button(
+    master = albedoFrame,
+    text = "Clear Albedo",
+    command = resetAlbedoCommand
+)
+resetAlbedoButton.pack()
+
+resetShadingButton = tk.Button(
+    master = shadingFrame,
+    text = "Clear Shading",
+    command = resetShadingCommand
+)
+resetShadingButton.pack()
+
+resetResidualButton = tk.Button(
+    master = residualFrame,
+    text = "Clear Residual",
+    command = resetResidualCommand
+)
+resetResidualButton.pack()
 
 addAlbedoLayerButton = tk.Button(
     text = "Add Albedo Color Layer",
@@ -455,16 +635,11 @@ addResidualButton = tk.Button(
 )
 addResidualButton.pack(side="bottom")
 
-performShadingDecompositionButton = tk.Button(
+performDecompositionButton = tk.Button(
     text = "Perform Shading Decomposition",
-    command=performShadingDecompositionCommand,
-    master = resultFrame
-)
-
-performResidualDecompositionButton = tk.Button(
-    text = "Perform Residual Decomposition",
-    command=performResidualDecompositionCommand,
-    master = resultFrame
+    command=performBothDecompositionCommand,
+    master = resultFrame,
+    state="disabled"
 )
 
 saveAlbedoImageButton = tk.Button(
@@ -491,8 +666,14 @@ saveResultImageButton = tk.Button(
     master = resultFrame
 )
 
-performShadingDecompositionButton.pack(side="bottom")
-performResidualDecompositionButton.pack(side="bottom")
+performIntrinsicDecompositionButton = tk.Button(
+    text = "Perform Intrinsic Decomposition",
+    command=performIntrinsicDecompositionCommand,
+    master = rightFrame
+)
+
+performIntrinsicDecompositionButton.pack(side="bottom")
+performDecompositionButton.pack(side="bottom")
 saveResultImageButton.pack(side="bottom")
 saveResidualImageButton.pack(side="bottom")
 saveShadingImageButton.pack(side="bottom")

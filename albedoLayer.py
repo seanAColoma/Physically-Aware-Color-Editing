@@ -22,4 +22,4 @@ class Layer:
         self.image[:, :, :3] = np.clip(img, 0, 255).astype(np.uint8)
 
     def resetColor(self):
-        self.updateColor(self, self.originalColor)
+        self.updateColor(self.originalColor)

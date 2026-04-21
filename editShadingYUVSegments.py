@@ -73,9 +73,6 @@ def reconstruct_shading(T, colors, Y):
     yuv = torch.cat([Y.unsqueeze(-1), uv], dim=-1)
     return yuv_to_rgb(yuv)
 
-
-
-
 def solveShadingYUV(input_img_np, colors_list):
     """
     Args:
@@ -137,6 +134,40 @@ def editShadingYUVSegments(T, Y, colors_edited_list, segments_rgba_np):
         edited_segments.append(seg_np_out)
 
     return edited_segments
+
+def editSingleShadingYUVSegment(T, Y, colors_edited_list, segment_rgba_np):
+    """
+    Args:
+        T: (N,H,W)
+        Y: (H,W)
+        colors_edited_list: list of [R,G,B]
+        segments_rgba_np: list of (H,W,4)
+
+    Returns:
+        edited_segments: list of (H,W,4)
+    """
+
+    if T.shape[0] > len(colors_edited_list):
+        colors_edited_list = colors_edited_list + [[255,255,255]]
+
+    colors_edited = torch.tensor(colors_edited_list, dtype=torch.float32) / 255.0
+
+    full_rgb = reconstruct_shading(T, colors_edited, Y)
+
+    seg = torch.tensor(segment_rgba_np / 255.0, dtype=torch.float32)
+
+    seg_rgb = seg[..., :3]
+    seg_alpha = seg[..., 3:]
+
+    mask = seg_alpha > 1e-3
+    seg_rgb[mask.squeeze(-1)] = full_rgb[mask.squeeze(-1)]
+
+    seg_rgba = torch.cat([seg_rgb, seg_alpha], dim=-1)
+
+    seg_np_out = seg_rgba.clamp(0,1).numpy()
+    seg_np_out = (seg_np_out * 255).astype(np.uint8)
+
+    return seg_np_out
 
 
 def combineSegments(segs):
