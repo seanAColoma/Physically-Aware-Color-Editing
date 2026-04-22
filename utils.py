@@ -5,7 +5,7 @@ import colorsys
 
 def selectImageFile():
     filePath = filedialog.askopenfilename(
-        filetypes=[("Image files", "*.jpg *.jpeg *.png *.bmp *.gif")]
+        filetypes=[("Image files", "*.png *.webp" )]
     )
     return filePath
 
@@ -22,9 +22,6 @@ def rgbToHex(r, g, b):
 def readRGBFromText(rgbFilePath):
     rgb = np.loadtxt(rgbFilePath, delimiter=',', dtype=np.uint8)
     return rgb
-
-def recontructFromLayers(albedo, diffuse, residual):
-    print("reconstucting...")
 
 def getTkinterImage(pilImage):
     return ImageTk.PhotoImage(ImageOps.contain(pilImage, (512,512)))

@@ -12,7 +12,7 @@ from editShadingRGBSegments import solveShadingRGB, combineSegments, editSingleS
 import torch
 
 from function.reconstruct import perform_recolor
-from function.decompose import decompose
+from function.decompose import decompose, saveDecomposedImages
 window = tk.Tk()
 layerColorButtonFrame = tk.Frame()
 notebook = ttk.Notebook(window)
@@ -56,7 +56,7 @@ notebook.add(albedoFrame, text="Albedo")
 notebook.add(shadingFrame, text="Shading")
 notebook.add(selectedShadingFrame, text="Selected Shading")
 notebook.add(residualFrame, text="Residual")
-notebook.add(selectedResidualFrame, text="Edited Residual")
+notebook.add(selectedResidualFrame, text="Selected Residual")
 notebook.add(resultFrame, text="Result")
 
 rightFrame = tk.Frame(window)
@@ -457,8 +457,8 @@ def resetAllCommand():
 # need to finish this, ask duc about how to save the images that get outputted here
 def performIntrinsicDecompositionCommand():
     filePath = utils.selectImageFile()
-    print("performing intrinsic decomposition")
-
+    img, alb, dif, res = decompose(filePath)
+    saveDecomposedImages(img, alb, dif, res)
 
 def performShadingDecompositionCommand():
     print("performing shading decomposition")
@@ -619,24 +619,22 @@ addAlbedoLayerButton = tk.Button(
 
 addAlbedoLayerButton.pack(side="bottom")
 
-# should this be on a segment basis?
 addShadingButton = tk.Button(
-    text = "Add Shading",
+    text = "Add Shading Layer",
     master = shadingFrame,
     command=addShadingLayer
 )
 addShadingButton.pack(side="bottom")
 
-# should this be on a segment basis?
 addResidualButton = tk.Button(
-    text = "Add Residual",
+    text = "Add Residual Layer",
     master = residualFrame,
     command=addResidualLayer
 )
 addResidualButton.pack(side="bottom")
 
 performDecompositionButton = tk.Button(
-    text = "Perform Shading Decomposition",
+    text = "Solve Shading",
     command=performBothDecompositionCommand,
     master = resultFrame,
     state="disabled"
